@@ -1,24 +1,29 @@
 -- Can't access current feed as I have not asked for access
 -- No historic scoreboard
-local global_debug = false
+local global_debug = true
+local cqueues = require("cqueues")
 local request = require("http.request")
 local lb = require("base64")
 local serpent = require("serpent")
 local json = require("dkjson")
-
+--local logging = require("logging");
+--local db = require("Lightningmdb")
 local domain = "https://www.mysportsfeeds.com"
 local abspath = "/api/feed/pull"
 local leauge = "/nhl"
 local years = "/"..arg[1]
 local season = "-"..arg[2]
-local feedtype = "/full_game_schedule.json"
+--https://www.mysportsfeeds.com/api/feed/pull/nhl/2016-2017-regular/cumulative_player_stats.json?playerstats=G,A,Pts,Sh
+local feedtypes = {"/full_game_schedule.json", "/cumulative_player_stats.json?playerstats=G,A,Pts,Sh", 
+  "/game_boxscore.json?gameid=20160211-WSH-MIN&teamstats=W,L,GF,GA,Pts&playerstats=G,A,Pts,Sh"}
 local fordate = ""
 local stats = ""
-local uri  = domain..abspath..leauge..years..season..feedtype
+local uri  = domain..abspath..leauge..years..season
 --"https://www.mysportsfeeds.com/api/feed/pull/nhl/2015-2016-regular/full_game_schedule.json"
 --"https://www.mysportsfeeds.com/api/feed/pull/nhl/2013-2014-regular/daily_game_schedule.json?fordate=20140310"
 
---"https://www.mysportsfeeds.com/api/feed/pull/nhl/2013-2014-regular/game_boxscore.json?gameid=20140310-NYI-VAN&teamstats=W,L,GF,GA,Pts&playerstats=G,A,Pts,Sh"
+--"https://www.mysportsfeeds+
+
 
 local username = "dinsdale"
 local password = "dinsdale"
@@ -79,27 +84,63 @@ local function getLocations(body)
   return l
 end
 
+local cq = cqueues.new()
+
 local function Run(debug)
-  print(uri)
-  local headers, stream = Get(uri,username, password)
-  local body, err = stream:get_body_as_string()
+  for i,v in pairs(feedtypes) do
+    cq:wrap(function()
+        local i=1
+        repeat
+      print(uri..v)
+        local headers, stream = Get(uri..v,username, password)
+        local body, err = stream:get_body_as_string()
 
-  if headers == nil then
-      io.stderr:write(tostring(stream), "\n")
-      os.exit(1)
-  else
-    if not body and err then
-      io.stderr:write(tostring(err), "\n")
-      os.exit(1)
-    end
-    if debug then 
-      printResponseHeaders(headers)
-      printResponseBody(body)
-    end
+        if headers == nil then
+            io.stderr:write(tostring(stream), "\n")
+            os.exit(1)
+        else
+          if not body and err then
+            io.stderr:write(tostring(err), "\n")
+            os.exit(1)
+          end
+          if debug then 
+            printResponseHeaders(headers)
+            --printResponseBody(body)
+          end
+        end
+        i = i+1
+        until i == 150
+        
+      end)
   end
+  
+  local cq_ok, err, errno = cq:loop()
+  if not cq_ok then
+      print("Jumped the loop.", debug.traceback())      
+  end
+  print("ended")
+end  
 
-  local locations = getLocations(body)
-  print(serpent.block(locations))
-end
+--  print(uri)
+--  local headers, stream = Get(uri,username, password)
+--  local body, err = stream:get_body_as_string()
+
+--  if headers == nil then
+--      io.stderr:write(tostring(stream), "\n")
+--      os.exit(1)
+--  else
+--    if not body and err then
+--      io.stderr:write(tostring(err), "\n")
+--      os.exit(1)
+--    end
+--    if debug then 
+--      printResponseHeaders(headers)
+--      printResponseBody(body)
+--    end
+--  end
+
+--  local locations = getLocations(body)
+--  print(serpent.block(locations))
+--end
 
 Run(global_debug)
