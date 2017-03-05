@@ -13,6 +13,8 @@ local abspath = "/api/feed/pull"
 local leauge = "/nhl"
 local years = "/"..arg[1]
 local season = "-"..arg[2]
+
+
 --https://www.mysportsfeeds.com/api/feed/pull/nhl/2016-2017-regular/cumulative_player_stats.json?playerstats=G,A,Pts,Sh
 local feedtypes = {"/full_game_schedule.json", "/cumulative_player_stats.json?playerstats=G,A,Pts,Sh", 
   "/game_boxscore.json?gameid=20160211-WSH-MIN&teamstats=W,L,GF,GA,Pts&playerstats=G,A,Pts,Sh"}
