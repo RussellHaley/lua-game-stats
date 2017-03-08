@@ -8,8 +8,8 @@ local list = require("luarocks.list")
 local s = require("serpent")
 
 
-local results, trees, flags, version  = list.list("--outdated")
-local command = "luarocks list --outdated"
+local results, trees, flags, version  = list.list({"--outdated"})
+local command = "luarocks list".. " --outdated"
 
 print ("Version:\n"..(version or ""))
 print ("Trees:\n"..s.block(trees))

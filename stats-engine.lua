@@ -14,6 +14,7 @@ local leauge = "/nhl"
 local years = "/"..arg[1]
 local season = "-"..arg[2]
 
+local game = {datepart="",hometeam="",awayTeam=""}
 
 --https://www.mysportsfeeds.com/api/feed/pull/nhl/2016-2017-regular/cumulative_player_stats.json?playerstats=G,A,Pts,Sh
 local feedtypes = {"/full_game_schedule.json", "/cumulative_player_stats.json?playerstats=G,A,Pts,Sh", 
@@ -59,11 +60,16 @@ local function Get(uri, username, password)
   local req = request.new_from_uri(uri)
   local encoded = lb.encode(username..":"..password)
   
-  new_headers = require "http.headers".new
   req.headers:upsert("Authorization","Basic ".. encoded)
   if req_body then
     req.headers:upsert(":method", "POST")
     req:set_body(req_body)
+  end
+ 
+  if debug then
+    for i,v in pairs(req.headers) do
+      print(i,v)
+    end
   end
   
   return req:go(req_timeout)
@@ -71,19 +77,38 @@ end
 
 local function getLocations(body)
     
-  local out = json.decode(body)
-  local f = io.open("output.txt","w")
-  f:write(serpent.block(out))
-  f:close()
-
+--  local f = io.open("output.txt","w")
+--  f:write(serpent.block(out))
+--  f:close()
   local l = {}
-  local games = out.fullgameschedule.gameentry
+  local games = body.fullgameschedule.gameentry
   for i,v in pairs(games) do
     if l[v.location] == nil then
       l[v.location] = v.homeTeam.City .. " " .. v.homeTeam.Name
     end
   end
   return l
+end
+
+local function getPlayers(body)
+  local pl = {}
+  local players = body.cumulativeplayerstats.playerstatsentry
+  
+  for i,v in pairs(players) do
+    local p = {}
+    for j,item in pairs(v) do 
+      if j == "player" then         
+        p.ID = item.ID
+        p.FirstName = item.FirstName
+        p.LastName = item.LastName
+        --print(item.ID,item.FirstName,item.LastName)        
+      elseif j == "team" then
+        p.Team = item
+      end
+    end
+    table.insert(pl,p)
+  end
+  return pl
 end
 
 local cq = cqueues.new()
@@ -123,26 +148,38 @@ local function Run(debug)
   print("ended")
 end  
 
---  print(uri)
---  local headers, stream = Get(uri,username, password)
---  local body, err = stream:get_body_as_string()
+local function runOne(url)
+  local headers, stream = Get(url,username, password)
+  local body, err = stream:get_body_as_string()
 
---  if headers == nil then
---      io.stderr:write(tostring(stream), "\n")
---      os.exit(1)
---  else
---    if not body and err then
---      io.stderr:write(tostring(err), "\n")
---      os.exit(1)
---    end
---    if debug then 
---      printResponseHeaders(headers)
---      printResponseBody(body)
---    end
---  end
+  if headers == nil then
+      io.stderr:write(tostring(stream), "\n")
+      os.exit(1)
+  else
+    if not body and err then
+      io.stderr:write(tostring(err), "\n")
+      os.exit(1)
+    end
+    if debug then 
+      printResponseHeaders(headers)
+      printResponseBody(body)
+    end
+  end  
+  return json.decode(body)  
+end
 
---  local locations = getLocations(body)
---  print(serpent.block(locations))
---end
+debug = false
+--Run(global_debug)
+--runOne
+print(uri..feedtypes[1])
+print(uri..feedtypes[2])
 
-Run(global_debug)
+--print(runOne(uri..feedtypes[1]))
+--print(serpent.block(runOne("https://www.mysportsfeeds.com/api/feed/pull/nhl/2015-2016-regular/full_game_schedule.json")))
+--serpent.block(getLocations(runOne(uri..feedtypes[1])))
+
+print(serpent.block(getPlayers(runOne(uri..feedtypes[2]))))
+
+
+
+  
