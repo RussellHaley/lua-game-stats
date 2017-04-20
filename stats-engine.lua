@@ -12,6 +12,7 @@ local zInflate = zlib.inflate()
 local configuration = require "lib.configuration"
 local conf
 local rolling_logger = require "logging.rolling_file"
+local data = require "savePlayers"
 local log
 local loaded
 local debugFlag
@@ -133,8 +134,11 @@ local function getPlayersYear(year,season)
           p.Team = item
         end
       end
+      local pdb = data.new("/tmp/test","players")
+      pdb.addItem(p.ID,p)
       table.insert(pl,p)
     end
+    pdb.close()
     return pl
   else
     log:warn("Failed to retrieve players.");
