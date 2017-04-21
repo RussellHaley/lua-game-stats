@@ -3,16 +3,23 @@ local total_requests = 0
 local request = require("http.request")
 local lb = require("base64")
 local cqueues = require("cqueues")
+local signal = require("cqueues.signal")
 local serpent = require("serpent")
 local json = require("dkjson")
 local zlib = require "http.zlib"
 local zDefate = zlib.deflate()
 local zInflate = zlib.inflate()
 
+local main_loop
+local data_env
+local players_db
+local teams_db
+local player_season_point_db
 local configuration = require "lib.configuration"
 local conf
 local rolling_logger = require "logging.rolling_file"
-local data = require "savePlayers"
+local data = require("lmdb_env")
+--local data = require "savePlayers"
 local log
 local loaded
 local debugFlag
@@ -104,6 +111,7 @@ local function Get(uri, username, password, req_body)
 end
 
 
+
 --*******************************************************************************************************
 --*******************************************************************************************************
 local Players = {}
@@ -134,11 +142,14 @@ local function getPlayersYear(year,season)
           p.Team = item
         end
       end
-      local pdb = data.new("/tmp/test","players")
-      pdb.addItem(p.ID,p)
+      
+      if not players_db:add(p.ID,serpent.block(p)) then 
+        log:info("player existed");
+      end
+      
       table.insert(pl,p)
     end
-    pdb.close()
+    --pdb.close()
     return pl
   else
     log:warn("Failed to retrieve players.");
@@ -187,9 +198,15 @@ end
 -- Can't access current feed as I have not asked for access
 -- No historic scoreboard
 
-local function RunHistoric(cq)
+local function LoadDatabases(env)
+  players_db = env.open_database("players")
+  teams_db = env.open_database("team")
+  player_season_point_db = env.open_database("player_season_point_db")
+end
+
+local function LoadHistoric(cq)
   if not cq then 
-    cq = cqueues.new()
+    return nil, "NO_QCQUEUE",0
   end
 print(debugFlag)
   --add the historic getter routine
@@ -200,8 +217,8 @@ print(debugFlag)
     log:info("Creating Loops...")
     cq:wrap(function()       
         Players[i] = getPlayersYear(i,"regular")
-        print(#Players[i])
-        --log:info(serpent.block(Players[i]))
+        print("Number of players in " .. i.. " (regular): "..#Players[i])
+        log:info("Number of players in " .. i.. " (regular): "..#Players[i])
       end)
     cq:wrap(function()
         local t = {}
@@ -211,20 +228,15 @@ print(debugFlag)
         --end
 
         Years[i] = t          
-        TeamLocations[i] = parseLocations(Years[i]["regular"])          
+        TeamLocations[i] = parseLocations(Years[i]["regular"]) 
+        print("Got teams in " .. i.. " (regular)")
+        log:info("Got teams in " .. i.. " (regular)")
+        local ok err, errno = teams_db:add(i,serpent.block(TeamLocations[i]))
+        if not ok then print(err) end
       end)
   end
-  log:info("Running...")
-  local cq_ok, err, errno = cq:loop()
-  if not cq_ok then
-    print("Execution failed, check logs for messages.")
-    local out 
-    if errno then out = err .. errno else out = err end
-    log:warn("Jumped the loop.".. out)      
-    log:warn(debug.traceback())
-  else    
-    --print(serpent.block(Years))
-  end
+ 
+
 end   
 
 
@@ -242,21 +254,74 @@ local function Start(debug_flag)
     os.exit(0)
   end  
   
-  debugFlag = debug_flag or conf.debug_flag  
+  debugFlag = conf.debug_flag  
   log:debug(string.format("Debug logging is %s",debug))  
+  
+  main_loop = cqueues.new()
+  data_env = assert(data.new(conf.data_dir))
+  LoadDatabases(data_env)
+  
   uri = conf.domain..slash..conf.abspath..slash..conf.leauge
   log:info("uri is "..uri)
-
   log:info("Starting Stats Engine at" .. os.date("%b-%d-%C %H:%M:%S"))
+  
+end
+
+function LoadWait(cq)
+ cq:wrap(function()
+      local sl = signal.listen(signal.SIGTERM, signal.SIGINT)
+      local signo
+
+      while true do
+        signo = sl:wait(1)
+        if signo == signal.SIGTERM then
+          print(signo, signal[signo])
+          print("Am I here?")
+            log:info("Shutdown at " .. os.date("%b-%d-%C %H:%M:%S"))
+            log:info("Total number of requests was " .. total_requests)
+            log:info("Total runtime was " .. string.format("%.1fs", cqueues.monotime() - time1)) 
+          os.exit(true)
+        end
+      end
+    end)
+  
+end
+
+local function Run(cq)
+  
+  log:info("Running...")
+  local cq_ok, err, errno = cq:loop()
+  if not cq_ok then
+    local out 
+    if errno then out = err .. errno else out = err end
+    local index = string.find(out,"interupted!")
+    if not index then
+      log:warn("Jumped the loop.".. out)      
+      log:warn(debug.traceback())
+    end
+  else    
+    --print(serpent.block(Years))
+  end
 end
 
 local function Shutdown()
+  local stats = data_env:stats()
+  for i,v in pairs(stats) do
+      log:info(string.format(i..": "..v))
+  end
+  data_env:close_env()
   log:info("Shutdown at " .. os.date("%b-%d-%C %H:%M:%S"))
   log:info("Total number of requests was " .. total_requests)
   log:info("Total runtime was " .. string.format("%.1fs", cqueues.monotime() - time1))  
 end
 
 Start(arg[1])
-RunHistoric()
---Loop()
+--Run(main_loop)
+LoadHistoric(main_loop)
+--LoadWait(main_loop)
+Run(main_loop)
+--players_db:printAll()
 Shutdown()
+
+--Loop()
+--Shutdown()
