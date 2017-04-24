@@ -14,6 +14,7 @@ local main_loop
 local data_env
 local players_db
 local teams_db
+local year_players_db
 local player_season_point_db
 local configuration = require "lib.configuration"
 local conf
@@ -30,7 +31,7 @@ local dash = "-"
 --"https://www.mysportsfeeds.com/api/feed/pull/nhl/2013-2014-regular/daily_game_schedule.json?fordate=20140310"
 --https://www.mysportsfeeds.com/api/feed/pull/nhl/2016-2017-regular/cumulative_player_stats.json?playerstats=G,A,Pts,Sh
 
- 
+
 local feedtypes = {
   ["game_schedule"] = "full_game_schedule.json", 
   ["player_stats"] = "cumulative_player_stats.json?playerstats=G,A,Pts,Sh", 
@@ -73,8 +74,8 @@ local function Get(uri, username, password, req_body)
     req.headers:upsert(":method", "POST")
     req:set_body(req_body)
   end
-  
-    
+
+
 
   local headers, stream = req:go(conf.req_timeout)
   total_requests = total_requests + 1
@@ -125,7 +126,7 @@ local function getPlayersYear(year,season)
   url =uri..slash..year..dash..season..slash..feedtypes["player_stats"]..conf.force
   log:info("Entered getPlayers")
   local body = Get(url,conf.username,conf.password)
-  
+
   if body then
     local players = body.cumulativeplayerstats.playerstatsentry
 
@@ -141,12 +142,7 @@ local function getPlayersYear(year,season)
         elseif j == "team" then
           p.Team = item
         end
-      end
-      
-      if not players_db:add(p.ID,serpent.block(p)) then 
-        log:info("player existed");
-      end
-      
+      end    
       table.insert(pl,p)
     end
     --pdb.close()
@@ -161,7 +157,7 @@ local function getBoxscores()
   url =uri..feedtypes.box_score
   log:info("entered getBoxscores")
   local t = Get(url,conf.username, conf.password)
-  
+
   print(serpent.block(t))
 end
 
@@ -183,8 +179,20 @@ local function parseLocations(body)
 end
 
 local function Loop()
+
   for i,v in pairs(Years) do
-    Players[i] = getPlayersYear(i,"regular")       
+
+    Players[i] = getPlayersYear(i,"regular")
+
+    year_players = {}
+    local year = tostring(i)
+    for id,_ in pairs(Players[i]) do
+      year_players[tonumber(year..id)] = true
+    end
+
+    players_db:add_table(Players[i],true)
+    year_players_db:add_table(year_players)
+
     t = {}
     --for s in ipairs(seasons) do
     t["regular"] = getGameSchedule(i,"regular")
@@ -200,6 +208,7 @@ end
 
 local function LoadDatabases(env)
   players_db = env.open_database("players")
+  year_players_db = env.open_database("year_players")
   teams_db = env.open_database("team")
   player_season_point_db = env.open_database("player_season_point_db")
 end
@@ -208,21 +217,31 @@ local function LoadHistoric(cq)
   if not cq then 
     return nil, "NO_QCQUEUE",0
   end
-print(debugFlag)
+  print(debugFlag)
   --add the historic getter routine
   -- add the interface server
   -- add the get current routine
-  
+
   for i,v in pairs(Years) do
     log:info("Creating Loops...")
     cq:wrap(function()       
         Players[i] = getPlayersYear(i,"regular")
+        year_players = {}
+        local year = tostring(string.match(i,"(.*)-"))
+        for id,_ in pairs(Players[i]) do
+          local idx = tonumber(year..id)
+          print(year,id)
+          year_players[idx] = true
+        end
+
+        players_db:add_table(Players[i],true)
+        year_players_db:add_table(year_players)
         print("Number of players in " .. i.. " (regular): "..#Players[i])
         log:info("Number of players in " .. i.. " (regular): "..#Players[i])
       end)
     cq:wrap(function()
         local t = {}
-        
+
         --for s in ipairs(seasons) do
         t["regular"] = getGameSchedule(i,"regular")
         --end
@@ -235,40 +254,40 @@ print(debugFlag)
         if not ok then print(err) end
       end)
   end
- 
+
 
 end   
 
 
 
 local function Start(debug_flag)  
-  
+
   time1 = cqueues.monotime() 
   total_requests = 0
   conf = configuration.new([[stats-engine.conf]],true)
-  
+
   print("Log file is at:"..conf.debug_file_name)
   log = assert(rolling_logger(conf.debug_file_name, conf.file_roll_size or 1024*1024*10, conf.max_log_files or 31))
   if not log then
     print("logger failed")
     os.exit(0)
   end  
-  
+
   debugFlag = conf.debug_flag  
-  log:debug(string.format("Debug logging is %s",debug))  
-  
+  log:debug(string.format("Debug logging is %s",debugFlag))  
+
   main_loop = cqueues.new()
   data_env = assert(data.new(conf.data_dir))
   LoadDatabases(data_env)
-  
+
   uri = conf.domain..slash..conf.abspath..slash..conf.leauge
   log:info("uri is "..uri)
   log:info("Starting Stats Engine at" .. os.date("%b-%d-%C %H:%M:%S"))
-  
+
 end
 
 function LoadWait(cq)
- cq:wrap(function()
+  cq:wrap(function()
       local sl = signal.listen(signal.SIGTERM, signal.SIGINT)
       local signo
 
@@ -277,18 +296,18 @@ function LoadWait(cq)
         if signo == signal.SIGTERM then
           print(signo, signal[signo])
           print("Am I here?")
-            log:info("Shutdown at " .. os.date("%b-%d-%C %H:%M:%S"))
-            log:info("Total number of requests was " .. total_requests)
-            log:info("Total runtime was " .. string.format("%.1fs", cqueues.monotime() - time1)) 
+          log:info("Shutdown at " .. os.date("%b-%d-%C %H:%M:%S"))
+          log:info("Total number of requests was " .. total_requests)
+          log:info("Total runtime was " .. string.format("%.1fs", cqueues.monotime() - time1)) 
           os.exit(true)
         end
       end
     end)
-  
+
 end
 
 local function Run(cq)
-  
+
   log:info("Running...")
   local cq_ok, err, errno = cq:loop()
   if not cq_ok then
@@ -307,7 +326,7 @@ end
 local function Shutdown()
   local stats = data_env:stats()
   for i,v in pairs(stats) do
-      log:info(string.format(i..": "..v))
+    log:info(string.format(i..": "..v))
   end
   data_env:close_env()
   log:info("Shutdown at " .. os.date("%b-%d-%C %H:%M:%S"))
