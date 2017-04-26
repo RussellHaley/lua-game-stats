@@ -66,13 +66,13 @@ local function db_print_entries(self)
   t:abort()
 end
 
-local function db_search_entries(self,func, value)
+local function db_search_entries(self,func,...)
   local t,d = open_tx(self.name, true)
   local cursor, error, errorno = t:cursor_open(d)
   local k
   local retval= {}
   for k, v in cursor_pairs(cursor) do
-    local ok,val = func(k,v,value)
+    local ok,val = func(k,v,...)
     if ok then 
       retval[ok] = val
     end
@@ -82,6 +82,12 @@ local function db_search_entries(self,func, value)
   return retval
 end
 
+local function db_get_item(self,key)
+  local t,d = open_tx(self.name, true)
+  local ok,res,errno = t:get(d,key, _, 0)  
+  t:commit()
+  return ok,res,errno
+end
 
 local function db_add_table_item(self,table, check_dups)
   local t,d = open_tx(self.name)
@@ -173,7 +179,8 @@ local function open_database(name)
       add = db_add_item,
       add_table = db_add_table_item,
       print_all = db_print_entries,
-      search = db_search_entries
+      search = db_search_entries,
+      get = db_get_item
     }
     
     databases[name] = db
