@@ -66,6 +66,23 @@ local function db_print_entries(self)
   t:abort()
 end
 
+---Need to create a function for fetch size and offset?
+local function db_get_entries(self)
+  local retval = {}
+  local t,d = open_tx(self.name, true)
+  local cursor, error, errorno = t:cursor_open(d)
+  local k = 0
+  
+  for k, v in cursor_pairs(cursor) do
+    local ok, ret = serpent.load(v)
+    if ok then retval[tonumber(k)] = ret end
+  end
+  cursor:close()
+  t:abort()
+  return retval
+end
+
+
 local function db_search_entries(self,func,...)
   local t,d = open_tx(self.name, true)
   local cursor, error, errorno = t:cursor_open(d)
@@ -160,14 +177,22 @@ local function db_upsert_item(key,value)
   return key
 end
 
-local function open_database(name)
+--need to check if database exists yet!
+local function open_database(name,create)
   if lmdb_env then
     if databases[name] then 
       return databases[name]
     end
 
     local t = lmdb_env:txn_begin(nil, 0)
-    local dh = assert(t:dbi_open(name, MDB.CREATE))
+    if not name then name = "" end
+    local opts 
+    if create then 
+      opts = MDB.CREATE
+    else
+      opts = 0
+    end
+    local dh = assert(t:dbi_open(name, opts))
     
     local cursor = t:cursor_open(dh)
     cursor:close()
@@ -180,7 +205,8 @@ local function open_database(name)
       add_table = db_add_table_item,
       print_all = db_print_entries,
       search = db_search_entries,
-      get = db_get_item
+      get_item = db_get_item,
+      get_all = db_get_entries
     }
     
     databases[name] = db

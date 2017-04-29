@@ -1,11 +1,12 @@
 #!/usr/local/bin/lua
 
 local data = require("lmdb_env")
-
+local m = require("moses")
 local env = data.new("data")
 local serpent = require("serpent")
 db_players = env.open_database("players")
 db_year_player = env.open_database("year_players")
+teams_db = env.open_database("team")
 
 local function getPlayerYears(k,v,p)
 --  if type(k) ~= 'number' then
@@ -19,34 +20,41 @@ end
 
 
 local function getPlayersByCity(k,v,...) 
-  local p = ...
+  local p = table.pack(...)
+  local ok,res
   if type(v) == 'string' then
     ok, res = assert(serpent.load(v))
+  elseif type(v) == 'table' then
+    ok, res = true, v
   else
     return nil
   end
   
-  if res.Team.City == p then 
-    return k,res
-  else
-    return nil
+  if ok then
+    for _,v in pairs(p) do
+      if res.Team.City == v then 
+        return k,res
+      end
+    end
   end
+  return nil
 end
 
---local retvals = db_players:search(getPlayersByCity,"Vancouver")
 
+
+local function searchPlayerYear(year)
 local playersIn2015 = db_year_player:search(getPlayerYears,2015)
 
 if playersIn2015 then
   local count = 0
   for i,v in pairs(playersIn2015) do
     count = count + 1
-    local res, player = serpent.load(db_players:get(i))
+    local res, player = serpent.load(db_players:get_item(i))
     print(player.FirstName, player.LastName)
   end
   print("players in ".."2015"..":"..count)
 end
-
+end
 --if retvals then 
 --  for i,v in pairs(retvals) do
 --    print(v.FirstName, v.LastName)
@@ -54,6 +62,28 @@ end
 --else
 --  print('not found')
 --end
+
+--local retvals = db_players:search(getPlayersByCity,"Vancouver")
+
+local players = db_players:get_all()
+
+local c = {Team={City="Vancouver"}}
+
+print(serpent.block(c))
+
+--searchPlayerYear()
+--local van = m.chain(players):select(getPlayersByCity,"Vancouver","Detroit"):countBy(function(i,v) return v.Team.City end):value()
+local van = m.chain(players):countBy(function(i,v) return v.Team.City end):value()
+  
+if van then 
+  for i,v in pairs(van) do
+    print(i,v)
+  end
+else
+  print('no vals')
+end
+
+
 
 env:close_env()
 
